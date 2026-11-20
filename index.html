@@ -29,6 +29,29 @@
   .card h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.1; color: var(--purple-dark); }
   .card p { margin: 6px 0; font-size: 17px; line-height: 1.35; font-weight: 600; }
   .card .big { font-size: 28px; font-weight: 800; margin: 12px 0 4px; }
+  .scorecard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 8px; }
+  .stat { background: #f1e7fb; border-radius: 14px; padding: 8px 4px 6px; }
+  .stat .lbl { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+  .stat .num { font-size: 26px; font-weight: 800; line-height: 1.1; }
+  .stat.now { background: var(--purple); color: #fff; }
+  .stat.best { background: #fff2c2; color: #7a5200; }
+  .verdict { font-size: 17px; font-weight: 800; margin: 6px 0; }
+  .verdict.win { color: #c27a00; }
+  .history { display: flex; align-items: flex-end; justify-content: center; gap: 5px; height: 56px; margin: 10px 0 2px; }
+  .history .bar { width: 18px; border-radius: 5px 5px 2px 2px; background: #d9c4ef; position: relative; min-height: 4px; }
+  .history .bar.cur { background: var(--purple); }
+  .history-lbl { font-size: 12px; font-weight: 700; opacity: 0.6; margin: 0; }
+  #startStats { font-weight: 800; color: var(--purple-dark); }
+  #grab { position: fixed; left: 50%; bottom: 8%; transform: translateX(-50%); background: rgba(255,255,255,0.95); color: var(--ink); border-radius: 20px; padding: 12px 20px 14px; text-align: center; box-shadow: 0 6px 0 rgba(67,36,94,0.2), 0 10px 30px rgba(0,0,0,0.25); border: 3px solid #fff; width: min(320px, calc(100vw - 32px)); box-sizing: border-box; pointer-events: none; animation: shake 0.25s ease-in-out infinite; }
+  #grab.hidden { display: none; }
+  #grab .title { font-size: 22px; font-weight: 800; color: #c2183a; line-height: 1.1; }
+  #grab .hint { font-size: 15px; font-weight: 700; margin: 2px 0 8px; }
+  #grab kbd { font: inherit; font-weight: 800; background: var(--purple); color: #fff; border-radius: 6px; padding: 0 6px; }
+  .meter { height: 16px; border-radius: 999px; background: #eadcf7; overflow: hidden; }
+  .meter > div { height: 100%; width: 0%; background: linear-gradient(90deg, #b57be6, var(--purple)); border-radius: 999px; transition: width 0.08s; }
+  .meter.timer { height: 6px; margin-top: 6px; background: #ffe1e6; }
+  .meter.timer > div { background: #ff5c7a; transition: none; }
+  @keyframes shake { 0%,100% { transform: translateX(-50%) rotate(0); } 25% { transform: translateX(calc(-50% - 3px)) rotate(-1deg); } 75% { transform: translateX(calc(-50% + 3px)) rotate(1deg); } }
   .tag { display: inline-block; padding: 0 8px; border-radius: 8px; font-weight: 800; }
   .tag.y { background: #fff2a8; color: #8a6a00; }
   .tag.w { background: #eef0f4; color: #4a4f5c; border: 1px solid #d6d9e0; }
@@ -47,6 +70,12 @@
   <div class="pill" id="timePill"><span class="ico">⏱️</span><span id="time">60</span></div>
   <div class="pill boost" id="boostPill" style="display:none"><span class="ico">🌿</span><span>Fast!</span><span id="boost">5</span></div>
 </div>
+<div id="grab" class="hidden">
+  <div class="title">Gotcha! 🙀</div>
+  <div class="hint">Mash <kbd>SPACE</kbd> (or tap) to wiggle free!</div>
+  <div class="meter"><div id="grabFill"></div></div>
+  <div class="meter timer"><div id="grabTimer"></div></div>
+</div>
 <div id="overlay">
   <div class="card" id="card">
     <div class="emoji">🐱🌼</div>
@@ -56,8 +85,9 @@
     <p>Catch <span class="tag b">butterflies</span> for +3, and grab the rare <span class="tag g">golden daisy</span> for +10 before it fades!</p>
     <p>Eat <span class="tag c">catnip</span> to run super fast for 5 seconds.</p>
     <p>Avoid <span class="tag p">puddles</span>, they slow you way down!</p>
-    <p>Don't let your owner catch you!</p>
+    <p>Don't let your owner catch you! If you're caught, mash <span class="tag c">SPACE</span> or tap to wiggle free.</p>
     <p style="opacity:.75">Move with the mouse, arrow keys, or tap.</p>
+    <p id="startStats"></p>
     <button id="startBtn">Play</button>
   </div>
 </div>
@@ -507,6 +537,62 @@
   let roseAngle = 0, roseCooldown = 0;
   let wasWet = false, splashTimer = 0;
 
+  // ---------- Caught: wiggle free by mashing space / tapping ----------
+  const GRAB_TIME = 3, GRAB_PRESSES_START = 10, GRAB_PRESSES_MORE = 4, OWNER_STUN = 1.5;
+  let grabbed = false, grabTime = 0, grabProgress = 0, grabNeeded = GRAB_PRESSES_START;
+  let escapes = 0, ownerStun = 0, wiggleAmt = 0, endedAt = 0;
+  const grabEl = document.getElementById('grab');
+  const grabFill = document.getElementById('grabFill');
+  const grabTimerEl = document.getElementById('grabTimer');
+
+  function startGrab() {
+    grabbed = true; grabTime = GRAB_TIME; grabProgress = 0;
+    catMoving = false; ownerMoving = false; pointerTarget = null;
+    grabEl.classList.remove('hidden');
+  }
+  function wiggle() {
+    if (!grabbed) return;
+    grabProgress = Math.min(1, grabProgress + 1 / grabNeeded);
+    wiggleAmt = 0.7;
+    burst(cat.position.x, cat.position.z, 0xffffff, 3);
+    if (grabProgress >= 1) escapeGrab();
+  }
+  function escapeGrab() {
+    grabbed = false;
+    grabEl.classList.add('hidden');
+    // Land a little way in front of the owner and give them a moment to recover
+    const a = owner.rotation.y;
+    catPos.set(ownerPos.x + Math.sin(a) * 2.3, ownerPos.y + Math.cos(a) * 2.3);
+    pushOutOfBushes(catPos, CAT_R);
+    clampToArena(catPos, CAT_R);
+    if (Math.hypot(catPos.x - ownerPos.x, catPos.y - ownerPos.y) < OWNER_CATCH + 0.6) {
+      catPos.set(ownerPos.x - Math.sin(a) * 2.3, ownerPos.y - Math.cos(a) * 2.3);
+      pushOutOfBushes(catPos, CAT_R); clampToArena(catPos, CAT_R);
+    }
+    ownerStun = OWNER_STUN;
+    escapes++;
+    grabNeeded = GRAB_PRESSES_START + escapes * GRAB_PRESSES_MORE;
+    cat.rotation.z = 0;
+    syncMeshes();
+    burst(catPos.x, catPos.y, 0xffffff, 14);
+    popText(catPos.x, catPos.y, 'Escaped!', true);
+  }
+  function updateGrab(dt) {
+    grabTime -= dt;
+    timeLeft = Math.max(0, timeLeft - dt);
+    updateHud();
+    grabProgress = Math.max(0, grabProgress - dt * 0.12);
+    wiggleAmt = Math.max(0, wiggleAmt - dt * 3);
+    // Cat held up in the owner's hands, wiggling
+    const a = owner.rotation.y;
+    cat.position.set(ownerPos.x + Math.sin(a) * 0.62, 1.05, ownerPos.y + Math.cos(a) * 0.62);
+    cat.rotation.y = a;
+    cat.rotation.z = Math.sin(t * 40) * wiggleAmt * 0.6;
+    grabFill.style.width = (grabProgress * 100) + '%';
+    grabTimerEl.style.width = Math.max(0, grabTime / GRAB_TIME * 100) + '%';
+    if (grabTime <= 0 || timeLeft <= 0) endRound(true);
+  }
+
   // Golden daisy: rare, appears for a short time
   const gold = makeGolden(); gold.visible = false; scene.add(gold);
   let goldTimer = 0, goldLife = 0;
@@ -596,6 +682,8 @@
 
   function startRound() {
     clearRound();
+    grabbed = false; escapes = 0; grabNeeded = GRAB_PRESSES_START; ownerStun = 0;
+    grabEl.classList.add('hidden'); cat.rotation.z = 0;
     catPos.set(-ARENA_W / 2 + 2.5, 0);
     ownerPos.set(ARENA_W / 2 - 2.5, 0);
     for (let i = 0; i < BUSH_COUNT; i++) {
@@ -641,7 +729,12 @@
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
       keys[e.key] = true; pointerTarget = null; e.preventDefault();
     }
-    if (!playing && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startRound(); }
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (grabbed && !e.repeat) wiggle();
+    }
+    // Enter starts a round (short pause after a round ends so mashing doesn't skip the score card)
+    if (!playing && e.key === 'Enter' && performance.now() - endedAt > 800) { e.preventDefault(); startRound(); }
   });
   window.addEventListener('keyup', e => { keys[e.key] = false; });
 
@@ -654,7 +747,10 @@
     if (raycaster.ray.intersectPlane(groundPlane, hit)) pointerTarget = new THREE.Vector2(hit.x, hit.z);
   }
   let pointerDown = false;
-  renderer.domElement.addEventListener('pointerdown', e => { pointerDown = true; setTargetFromEvent(e); });
+  renderer.domElement.addEventListener('pointerdown', e => {
+    if (grabbed) { wiggle(); return; }
+    pointerDown = true; setTargetFromEvent(e);
+  });
   window.addEventListener('pointerup', () => { pointerDown = false; });
   renderer.domElement.addEventListener('pointermove', e => {
     if (e.pointerType === 'mouse' || pointerDown) setTargetFromEvent(e);
@@ -680,13 +776,63 @@
     scorePill.classList.remove('bump'); void scorePill.offsetWidth; scorePill.classList.add('bump');
   }
 
+  // ---------- Saved score card (kept in this browser) ----------
+  const SCORE_KEY = 'fluffyCatGarden.scores';
+  function loadScores() {
+    try {
+      const d = JSON.parse(localStorage.getItem(SCORE_KEY));
+      if (d && Array.isArray(d.history)) return d;
+    } catch (e) {}
+    return { last: null, best: null, history: [] };
+  }
+  function saveScores(d) {
+    try { localStorage.setItem(SCORE_KEY, JSON.stringify(d)); } catch (e) {}
+  }
+  (function showStartStats() {
+    const d = loadScores();
+    if (d.last !== null) {
+      document.getElementById('startStats').textContent = 'Last score: ' + d.last + '  ·  Best: ' + d.best;
+    }
+  })();
+
   function endRound(caught) {
     playing = false;
+    grabbed = false; grabEl.classList.add('hidden'); cat.rotation.z = 0;
+    endedAt = performance.now();
     timePill.classList.remove('low');
+
+    const prev = loadScores();
+    const isBest = prev.best === null || score > prev.best;
+    const next = {
+      last: score,
+      best: prev.best === null ? score : Math.max(prev.best, score),
+      history: prev.history.concat(score).slice(-8),
+    };
+    saveScores(next);
+
+    let verdict;
+    if (prev.last === null) verdict = '<p class="verdict">First round! Now try to beat it.</p>';
+    else if (isBest) verdict = '<p class="verdict win">🏆 New best score!</p>';
+    else if (score > prev.last) verdict = '<p class="verdict">⬆️ ' + (score - prev.last) + ' more than last time!</p>';
+    else if (score === prev.last) verdict = '<p class="verdict">Same as last time. You can beat it!</p>';
+    else verdict = '<p class="verdict">' + (next.best - score) + ' away from your best. Keep going!</p>';
+
+    const maxH = Math.max(1, ...next.history);
+    const bars = next.history.map((v, i) =>
+      '<div class="bar' + (i === next.history.length - 1 ? ' cur' : '') + '" title="' + v + '" style="height:' +
+      Math.round(4 + (v / maxH) * 52) + 'px"></div>').join('');
+
     card.innerHTML = caught
       ? '<div class="emoji">🙀</div><h1>Caught!</h1><p>Your owner scooped you up.</p>'
       : '<div class="emoji">😸</div><h1>Time\'s up!</h1><p>You stayed free the whole minute.</p>';
-    card.innerHTML += '<p class="big">🌼 ' + score + '</p><button id="againBtn">Play again</button>';
+    card.innerHTML +=
+      '<div class="scorecard">' +
+        '<div class="stat now"><div class="lbl">This round</div><div class="num">' + score + '</div></div>' +
+        '<div class="stat"><div class="lbl">Last time</div><div class="num">' + (prev.last === null ? '–' : prev.last) + '</div></div>' +
+        '<div class="stat best"><div class="lbl">Best</div><div class="num">' + next.best + '</div></div>' +
+      '</div>' + verdict +
+      (next.history.length > 1 ? '<div class="history">' + bars + '</div><p class="history-lbl">Your recent rounds</p>' : '') +
+      '<button id="againBtn">Play again</button>';
     document.getElementById('againBtn').addEventListener('click', startRound);
     overlay.classList.remove('hidden');
   }
@@ -722,7 +868,9 @@
     const dt = Math.min(clock.getDelta(), 0.05);
     t += dt;
 
-    if (playing) {
+    if (playing && grabbed) {
+      updateGrab(dt);
+    } else if (playing) {
       // Cat input
       let mx = 0, mz = 0;
       if (keys.ArrowLeft) mx -= 1;
@@ -759,7 +907,8 @@
       const ownerSpeed = OWNER_SPEED_START + (OWNER_SPEED_END - OWNER_SPEED_START) * progress;
       const ox = catPos.x - ownerPos.x, oz = catPos.y - ownerPos.y;
       const od = Math.hypot(ox, oz);
-      ownerMoving = od > 0.001;
+      ownerStun = Math.max(0, ownerStun - dt);
+      ownerMoving = od > 0.001 && ownerStun <= 0;
       if (ownerMoving) {
         ownerPos.x += ox / od * ownerSpeed * dt;
         ownerPos.y += oz / od * ownerSpeed * dt;
@@ -862,15 +1011,15 @@
       // Timer and catch
       timeLeft -= dt;
       updateHud();
-      if (Math.hypot(ownerPos.x - catPos.x, ownerPos.y - catPos.y) < OWNER_CATCH) endRound(true);
+      if (Math.hypot(ownerPos.x - catPos.x, ownerPos.y - catPos.y) < OWNER_CATCH) startGrab();
       else if (timeLeft <= 0) { timeLeft = 0; updateHud(); endRound(false); }
     } else {
       catMoving = ownerMoving = false;
     }
 
     // Animations (visual only)
-    cat.position.y = catMoving ? Math.abs(Math.sin(t * 14)) * 0.08 : 0;
-    cat.userData.tail.rotation.z = Math.sin(t * (catMoving ? 10 : 4)) * 0.45;
+    if (!grabbed) cat.position.y = catMoving ? Math.abs(Math.sin(t * 14)) * 0.08 : 0;
+    cat.userData.tail.rotation.z = Math.sin(t * (catMoving || grabbed ? 10 : 4)) * 0.45;
     owner.position.y = ownerMoving ? Math.abs(Math.sin(t * 10)) * 0.06 : 0;
     daisies.forEach((d, i) => {
       d.grow = Math.min(1, d.grow + dt * 3);
