@@ -44,6 +44,8 @@
   #startStats { font-weight: 800; color: var(--purple-dark); }
   #grab { position: fixed; left: 50%; bottom: 8%; transform: translateX(-50%); background: rgba(255,255,255,0.95); color: var(--ink); border-radius: 20px; padding: 12px 20px 14px; text-align: center; box-shadow: 0 6px 0 rgba(67,36,94,0.2), 0 10px 30px rgba(0,0,0,0.25); border: 3px solid #fff; width: min(320px, calc(100vw - 32px)); box-sizing: border-box; pointer-events: none; animation: shake 0.25s ease-in-out infinite; }
   #grab.hidden { display: none; }
+  #safe { position: fixed; top: 14px; left: 16px; background: #e6f3ff; color: #1d6fb8; font-weight: 800; font-size: 20px; padding: 6px 16px 4px; border-radius: 999px; border: 3px solid #fff; box-shadow: 0 4px 0 rgba(29,111,184,0.2), 0 6px 18px rgba(0,0,0,0.15); pointer-events: none; }
+  @media (max-width: 640px) { #safe { top: 70px; } }
   #grab .title { font-size: 22px; font-weight: 800; color: #c2183a; line-height: 1.1; }
   #grab .hint { font-size: 15px; font-weight: 700; margin: 2px 0 8px; }
   #grab kbd { font: inherit; font-weight: 800; background: var(--purple); color: #fff; border-radius: 6px; padding: 0 6px; }
@@ -70,6 +72,7 @@
   <div class="pill" id="timePill"><span class="ico">⏱️</span><span id="time">60</span></div>
   <div class="pill boost" id="boostPill" style="display:none"><span class="ico">🌿</span><span>Fast!</span><span id="boost">5</span></div>
 </div>
+<div id="safe" style="display:none">🛡️ Safe! <span id="safeNum">3</span></div>
 <div id="grab" class="hidden">
   <div class="title">Gotcha! 🙀</div>
   <div class="hint">Mash <kbd>SPACE</kbd> (or tap) to wiggle free!</div>
@@ -538,9 +541,11 @@
   let wasWet = false, splashTimer = 0;
 
   // ---------- Caught: wiggle free by mashing space / tapping ----------
-  const GRAB_TIME = 3, GRAB_PRESSES_START = 10, GRAB_PRESSES_MORE = 0, OWNER_STUN = 1.5;
+  const GRAB_TIME = 3, GRAB_PRESSES_START = 7, GRAB_PRESSES_MORE = 0, OWNER_STUN = 1.5;
   const IMMUNE_TIME = 3; // seconds the owner can't catch you after you wiggle free
   let immune = 0;
+  const safeEl = document.getElementById('safe');
+  const safeNum = document.getElementById('safeNum');
   let grabbed = false, grabTime = 0, grabProgress = 0, grabNeeded = GRAB_PRESSES_START;
   let escapes = 0, ownerStun = 0, wiggleAmt = 0, endedAt = 0;
   const grabEl = document.getElementById('grab');
@@ -800,7 +805,7 @@
 
   function endRound(caught) {
     playing = false;
-    grabbed = false; grabEl.classList.add('hidden'); cat.rotation.z = 0; immune = 0; cat.visible = true;
+    grabbed = false; grabEl.classList.add('hidden'); cat.rotation.z = 0; immune = 0;
     endedAt = performance.now();
     timePill.classList.remove('low');
 
@@ -1022,8 +1027,9 @@
     }
 
     // Animations (visual only)
-    // Blink while safe after an escape
-    cat.visible = !(playing && immune > 0 && Math.sin(t * 25) < -0.3);
+    // "Safe!" words in the corner while the cat can't be caught
+    safeEl.style.display = playing && immune > 0 ? '' : 'none';
+    if (immune > 0) safeNum.textContent = Math.ceil(immune);
     if (!grabbed) cat.position.y = catMoving ? Math.abs(Math.sin(t * 14)) * 0.08 : 0;
     cat.userData.tail.rotation.z = Math.sin(t * (catMoving || grabbed ? 10 : 4)) * 0.45;
     owner.position.y = ownerMoving ? Math.abs(Math.sin(t * 10)) * 0.06 : 0;
